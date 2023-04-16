@@ -106,13 +106,12 @@ def main():
 
             # test augmented images
             if i == 1:
-                cv.imshow("original", new_ds[i]["img"])
-                cv.waitKey(0)
-                cv.destroyAllWindows()
+                plt.imshow(new_ds[i]["img"], cmap="gray")
+                plt.show()
                 for i in range(len(augmented)):
-                    cv.imshow(f"augmented-{i}", augmented[i])
-                    cv.waitKey(0)
-                    cv.destroyAllWindows()
+                    plt.imshow(augmented[i], cmap="gray")
+                    plt.show()
+
         else:
             if offset > 0:
                 augmented = augment_image(new_ds[i]["img"], ratio)
