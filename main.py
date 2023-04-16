@@ -3,7 +3,8 @@ import torchxrayvision as xrv
 import matplotlib.pyplot as plt
 from PIL import Image
 import imgaug.augmenters as iaa
-import torchvision.models as models;
+import torchvision.models as models
+import torchvision.transforms as transforms
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
@@ -17,14 +18,23 @@ augment_seq = iaa.Sequential([
     iaa.GaussianBlur(sigma=(0, 2.0)),
 ], random_order=True)
 
+resnet = models.resnet50(pretrained=True)
+resnet.eval()
+
+def to_255(img):
+    return (img * 255)
 
 def augment_image(image, n_augments = 1):
     images_aug = [image] * n_augments
     images_aug = augment_seq.augment_images(images_aug)
     return images_aug
 
+'''
+Normalized image pixel to 0-1, original is -1024 to 1024
+'''
 def norm_pixel_values(img):
-    return np.clip((img / 1024 + 1.) * 0.5 * 255, 0, 255).astype(np.uint8)
+    return np.clip((img / 1024 + 1.) * 0.5, 0, 1)
+
 
 # original label
 '''
@@ -94,10 +104,10 @@ def main():
 
             # test augmented images
             if i == 1:
-                plt.imshow(new_ds[i]["img"], cmap="gray")
+                plt.imshow(to_255(new_ds[i]["img"]), cmap="gray")
                 plt.show()
                 for i in range(len(augmented)):
-                    plt.imshow(augmented[i], cmap="gray")
+                    plt.imshow(to_255(augmented[i]), cmap="gray")
                     plt.show()
 
         else:
@@ -109,6 +119,7 @@ def main():
             non_covid_cnt += len(augmented)
         augment_ds.append(augmented)
 
+    augmented = None
     print(f"Augmented: Covid: {covid_cnt}, others: {non_covid_cnt}")
 
 if __name__ == "__main__":
