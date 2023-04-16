@@ -6,8 +6,6 @@ import imgaug.augmenters as iaa
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
-width = 200
-height = 200
 augment_seq = iaa.Sequential([
     iaa.Fliplr(0.5),
     iaa.Affine(
@@ -24,12 +22,6 @@ def augment_image(image, n_augments = 1):
     images_aug = [image] * n_augments
     images_aug = augment_seq.augment_images(images_aug)
     return images_aug
-
-
-def resize(input):
-    pil_img = Image.fromarray(input)
-    resized_phil_img = pil_img.resize((width, height), Image.ANTIALIAS)
-    return np.array(resized_phil_img)
 
 def norm_pixel_values(img):
     return np.clip((img / 1024 + 1.) * 0.5 * 255, 0, 255).astype(np.uint8)
@@ -72,8 +64,7 @@ def main():
     # Labelling
     for i in range(len(dataset)):
         img = dataset[i]["img"][0]
-        resized = resize(img)
-        resized = norm_pixel_values(resized)
+        resized = norm_pixel_values(img)
 
         ds = dataset[i]
         new_ds.append({
@@ -118,11 +109,7 @@ def main():
             non_covid_cnt += len(augmented)
         augment_ds.append(augmented)
 
-    print(f"Covid: {covid_cnt}, others: {non_covid_cnt}")
-    # print(type(img))
-    # plt.show()
-    # csv = pd.DataFrame(dataset.csv)
-    # print(tabulate(csv.head(), headers='keys'))
+    print(f"Augmented: Covid: {covid_cnt}, others: {non_covid_cnt}")
 
 if __name__ == "__main__":
     main()
