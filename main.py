@@ -21,19 +21,32 @@ augment_seq = iaa.Sequential([
 resnet = models.resnet50(pretrained=True)
 resnet.eval()
 
+
 def to_255(img):
     return (img * 255)
 
-def augment_image(image, n_augments = 1):
+
+def augment_image(image, n_augments=1):
     images_aug = [image] * n_augments
     images_aug = augment_seq.augment_images(images_aug)
     return images_aug
 
+
 '''
 Normalized image pixel to 0-1, original is -1024 to 1024
 '''
+
+
 def norm_pixel_values(img):
     return np.clip((img / 1024 + 1.) * 0.5, 0, 1)
+
+
+def preprocess_for_net(target_size=(224, 224)):
+    preprocess = transforms.Compose([
+        transforms.Resize(target_size),
+        transforms.ToTensor,
+
+    ])
 
 
 # original label
@@ -65,8 +78,10 @@ def norm_pixel_values(img):
 24 = {str} 'Viral'
 '''
 
+
 def main():
-    dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images", csvpath="covid-chestxray-dataset-master/metadata.csv")
+    dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images",
+                                           csvpath="covid-chestxray-dataset-master/metadata.csv")
 
     new_ds = []
     covid_cnt = 0
@@ -87,7 +102,7 @@ def main():
             covid_cnt += 1
 
     non_covid_cnt = len(dataset) - covid_cnt
-    dataset = None   # to gc
+    dataset = None  # to gc
 
     # Data augmentation
     augment_ds = []
@@ -95,21 +110,12 @@ def main():
     ratio = -(covid_cnt // -non_covid_cnt)
     print(f"ratio is {ratio}")
 
-    covid_cnt = non_covid_cnt = 0       # for recalculation
+    covid_cnt = non_covid_cnt = 0  # for recalculation
     for i in range(len(new_ds)):
         augmented = []
         if new_ds[i]["lab"] == 1:
             augmented = augment_image(new_ds[i]["img"])
             covid_cnt += len(augmented)
-
-            # test augmented images
-            if i == 1:
-                plt.imshow(to_255(new_ds[i]["img"]), cmap="gray")
-                plt.show()
-                for i in range(len(augmented)):
-                    plt.imshow(to_255(augmented[i]), cmap="gray")
-                    plt.show()
-
         else:
             if offset > 0:
                 augmented = augment_image(new_ds[i]["img"], ratio)
@@ -117,10 +123,17 @@ def main():
             else:
                 augmented = augment_image(new_ds[i]["img"])
             non_covid_cnt += len(augmented)
+
+        for j in range(len(augmented)):
+            augmented[j] = {
+                "lab": new_ds[i]["lab"],
+                "img": augmented[j]
+            }
         augment_ds.append(augmented)
 
     augmented = None
     print(f"Augmented: Covid: {covid_cnt}, others: {non_covid_cnt}")
+
 
 if __name__ == "__main__":
     main()
