@@ -1,12 +1,8 @@
-import cv2 as cv
 import numpy as np
 import torchxrayvision as xrv
 import matplotlib.pyplot as plt
-import pandas as pd
-from tabulate import tabulate
 from PIL import Image
 import imgaug.augmenters as iaa
-from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
@@ -25,7 +21,6 @@ augment_seq = iaa.Sequential([
 
 
 def augment_image(image, n_augments = 1):
-    image = np.clip(image * 255, 0, 255).astype(np.uint8)
     images_aug = [image] * n_augments
     images_aug = augment_seq.augment_images(images_aug)
     return images_aug
@@ -36,7 +31,8 @@ def resize(input):
     resized_phil_img = pil_img.resize((width, height), Image.ANTIALIAS)
     return np.array(resized_phil_img)
 
-
+def norm_pixel_values(img):
+    return np.clip((img / 1024 + 1.) * 0.5 * 255, 0, 255).astype(np.uint8)
 
 # original label
 '''
@@ -69,15 +65,16 @@ def resize(input):
 
 def main():
     dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images", csvpath="covid-chestxray-dataset-master/metadata.csv")
-    img = dataset[2]["img"][0]
 
     new_ds = []
-
     covid_cnt = 0
 
     # Labelling
     for i in range(len(dataset)):
+        img = dataset[i]["img"][0]
         resized = resize(img)
+        resized = norm_pixel_values(resized)
+
         ds = dataset[i]
         new_ds.append({
             "idx": ds["idx"],
