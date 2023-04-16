@@ -3,6 +3,7 @@ import torchxrayvision as xrv
 import matplotlib.pyplot as plt
 from PIL import Image
 import imgaug.augmenters as iaa
+import torchvision.models as models;
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
@@ -15,7 +16,6 @@ augment_seq = iaa.Sequential([
     iaa.Multiply((0.8, 1.2)),
     iaa.GaussianBlur(sigma=(0, 2.0)),
 ], random_order=True)
-
 
 
 def augment_image(image, n_augments = 1):
@@ -64,12 +64,12 @@ def main():
     # Labelling
     for i in range(len(dataset)):
         img = dataset[i]["img"][0]
-        resized = norm_pixel_values(img)
+        normalized = norm_pixel_values(img)
 
         ds = dataset[i]
         new_ds.append({
             "idx": ds["idx"],
-            "img": resized,
+            "img": normalized,
             "lab": ds["lab"][3]
         })
 
