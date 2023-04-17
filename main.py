@@ -8,6 +8,8 @@ import torchvision.transforms as transforms
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
+width = height = 224
+
 augment_seq = iaa.Sequential([
     iaa.Fliplr(0.5),
     iaa.Affine(
@@ -41,12 +43,18 @@ def norm_pixel_values(img):
     return np.clip((img / 1024 + 1.) * 0.5, 0, 1)
 
 
-def preprocess_for_net(target_size=(224, 224)):
-    preprocess = transforms.Compose([
-        transforms.Resize(target_size),
-        transforms.ToTensor,
+def resize(input):
+    pil_img = Image.fromarray(input)
+    resized_phil_img = pil_img.resize((width, height), Image.ANTIALIAS)
+    return np.array(resized_phil_img)
 
+def preprocess_for_net(mean, std):
+    preprocess = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.ToTensor,
+        transforms.Normalize(mean, std)
     ])
+    return preprocess
 
 
 # original label
@@ -129,11 +137,22 @@ def main():
                 "lab": new_ds[i]["lab"],
                 "img": augmented[j]
             }
-        augment_ds.append(augmented)
+
+        for new_augment in augmented:
+            augment_ds.append(new_augment)
 
     augmented = None
     print(f"Augmented: Covid: {covid_cnt}, others: {non_covid_cnt}")
 
+    # resize to ensure all shape are the same for computing mean & std
+    for i in range(len(augment_ds)):
+        augment_ds[i]["img"] = resize(augment_ds[i]["img"])
+
+    all_images = [d["img"] for d in augment_ds]
+    stack = np.stack(all_images, axis=0)
+    mean = np.mean(stack)
+    std = np.std(stack)
+    print(f"{mean}, {std}")
 
 if __name__ == "__main__":
     main()
