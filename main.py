@@ -97,10 +97,20 @@ def tensor_to_ndarray(img, std, mean):
 def main():
     dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images",
                                            csvpath="covid-chestxray-dataset-master/metadata.csv")
+    ds = preprocessing(dataset)
+    print(ds)
 
+
+'''
+return list of dictionary
+{
+    "lab": 1 or 0 for covid or non-covid case,
+    "img": tenor image object for putting into network
+}
+'''
+def preprocessing(dataset):
     new_ds = []
     covid_cnt = 0
-
     # Labelling
     for i in range(len(dataset)):
         img = dataset[i]["img"][0]
@@ -115,16 +125,13 @@ def main():
 
         if ds["lab"][3] == 1:
             covid_cnt += 1
-
     non_covid_cnt = len(dataset) - covid_cnt
     dataset = None  # to gc
-
     # Data augmentation
     augment_ds = []
     offset = covid_cnt - non_covid_cnt
     ratio = -(covid_cnt // -non_covid_cnt)
     print(f"ratio is {ratio}")
-
     covid_cnt = non_covid_cnt = 0  # for recalculation
     for i in range(len(new_ds)):
         augmented = []
@@ -147,28 +154,25 @@ def main():
 
         for new_augment in augmented:
             augment_ds.append(new_augment)
-
     augmented = None
     print(f"Augmented: Covid: {covid_cnt}, others: {non_covid_cnt}")
-
     # resize to ensure all shape are the same for computing mean & std
     for i in range(len(augment_ds)):
         augment_ds[i]["img"] = resize(augment_ds[i]["img"])
-
     all_images = [d["img"] for d in augment_ds]
     stack = np.stack(all_images, axis=0)
     mean = np.mean(stack)
     std = np.std(stack)
     print(f"{mean}, {std}")
-
     for i in range(len(augment_ds)):
         augment_ds[i]["img"] = preprocess_for_net(augment_ds[i]["img"], mean, std)
-
     # tmp = tensor_to_ndarray(augment_ds[0]["img"], mean=mean, std=std)
     #
     # # Display the image using plt.imshow()
     # plt.imshow(tmp, cmap='gray')
     # plt.show()
+    print("Preprocessing end")
+    return augment_ds
 
 
 if __name__ == "__main__":
