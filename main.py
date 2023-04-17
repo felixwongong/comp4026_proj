@@ -25,7 +25,7 @@ augment_seq = iaa.Sequential([
     iaa.GaussianBlur(sigma=(0, 2.0)),
 ], random_order=True)
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def to_255(img):
@@ -74,7 +74,6 @@ def tensor_to_ndarray(img_tensor, std, mean):
     return img
 
 
-
 class CovidDataset(Dataset):
     def __init__(self, data_list):
         self.data_list = data_list
@@ -90,61 +89,6 @@ class CovidDataset(Dataset):
         return len(self.data_list)
 
 
-def main():
-    dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images",
-                                           csvpath="covid-chestxray-dataset-master/metadata.csv")
-    ds, mean, std = preprocessing(dataset)
-
-    train_index, test_index = train_test_split(range(len(ds)), test_size=0.2, random_state=42)
-    train_data = Subset(ds, train_index)
-    test_data = Subset(ds, test_index)
-
-    train_ds = CovidDataset(train_data.dataset)
-    test_ds = CovidDataset(test_data.dataset)
-    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
-
-    resnet = models.resnet50(pretrained=True)
-
-    resnet.fc = nn.Linear(resnet.fc.in_features, 2)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(resnet.parameters(), lr=0.001, momentum=0.9)
-
-    num_epochs = 10
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        for i, data in enumerate(train_loader, 0):
-            img, lab = data
-            img, lab = img.to(device), lab.to(device)
-
-            optimizer.zero_grad()
-
-            outputs = resnet(img)
-            loss = criterion(outputs, lab)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-        print(f"Epoch {epoch + 1}, Loss: {running_loss}")
-
-    resnet.eval()
-    with torch.no_grad():
-        for i, data in enumerate(test_loader):
-            img, lab = data
-            img, lab = img.to(device), lab.to(device)
-            outputs = resnet(img)
-            _, predicted = torch.max(outputs.data, 1)
-
-            for j in range(img.size(0)):
-                # Display the image
-                plt.imshow(tensor_to_ndarray(img[j], std=std, mean=mean))
-                plt.title(f'Label: {lab[j].item()}, Predicted: {predicted[j].item()}')
-                plt.axis('off')
-                plt.show()
-
-
 '''
 return list of dictionary
 {
@@ -152,6 +96,8 @@ return list of dictionary
     "img": tenor image object for putting into network
 }
 '''
+
+
 def preprocessing(dataset):
     new_ds = []
     covid_cnt = 0
@@ -216,6 +162,224 @@ def preprocessing(dataset):
     # plt.show()
     print("Preprocessing end")
     return augment_ds, mean, std
+
+
+
+
+
+def train(model, train_loader, optimizer, criterion, epoches):
+    """
+        Enables CUDA if available to speed up training
+    """
+    epoch_losses = []
+
+    activation = {}
+
+    def get_activation(name):
+        def hook(model, input, output):
+            activation[name] = output.detach()
+
+        return hook
+
+    for epoch in range(epoches):
+        running_loss = 0.0
+        for i, data in enumerate(train_loader, 0):
+            img, lab = data
+            img, lab = img.to(device), lab.to(device)
+
+            optimizer.zero_grad()
+
+            outputs = model(img)
+            loss = criterion(outputs, lab)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+        epoch_losses.append(running_loss)
+        print(f"Epoch {epoch + 1}, Loss: {running_loss}")
+
+    model_children = list(model.children())
+
+
+    """
+    the following visualization fetched from
+    https://debuggercafe.com/visualizing-filters-and-feature-maps-in-convolutional-neural-networks-using-pytorch/
+    """
+    model_weights = []
+    counter = 0
+    conv_layers = []
+
+    for i in range(len(model_children)):
+        if type(model_children[i]) == nn.Conv2d:
+            counter += 1
+            model_weights.append(model_children[i].weight)
+            conv_layers.append(model_children[i])
+        elif type(model_children[i]) == nn.Sequential:
+            for j in range(len(model_children[i])):
+                for child in model_children[i][j].children():
+                    if type(child) == nn.Conv2d:
+                        counter += 1
+                        model_weights.append(child.weight)
+                        conv_layers.append(child)
+
+    plt.figure(figsize=(20, 17))
+    for i, filter in enumerate(model_weights[0]):
+        plt.subplot(8, 8, i + 1)
+        plt.imshow(filter[0, :, :].cpu().detach(), cmap='gray')
+        plt.axis('off')
+        plt.savefig('./outputs/filter.png')
+    plt.show()
+
+    img, lab = None, None
+    for i, data in enumerate(train_loader, 0):
+        img, lab = data
+        img, lab = img.to(device), lab.to(device)
+        break
+
+    results = [conv_layers[0](img)]
+
+    for i in range(1, len(conv_layers)):
+        # pass the result from the last layer to the next layer
+        results.append(conv_layers[i](results[-1]))
+    # make a copy of the `results`
+    outputs = results
+
+    for num_layer in range(len(outputs)):
+        plt.figure(figsize=(30, 30))
+        layer_viz = outputs[num_layer][0, :, :, :]
+        layer_viz = layer_viz.data
+        print(layer_viz.size())
+        for i, filter in enumerate(layer_viz):
+            if i == 64:
+                break
+            plt.subplot(8, 8, i + 1)
+            plt.imshow(filter.cpu(), cmap='gray')
+            plt.axis("off")
+        print(f"Saving layer {num_layer} feature maps...")
+        plt.savefig(f"./outputs/layer_{num_layer}.png")
+        plt.show()
+        plt.close()
+
+    model.eval()
+
+    # plot loss over epoch
+    plt.plot(epoch_losses)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.show()
+
+    # plot activation
+    for name, act in activation.items():
+        print(act.shape)
+        plt.imshow(act[0, 0, :, :].cpu().numpy())
+        plt.title(name)
+        plt.show()
+
+
+def test(model, test_loader, std, mean):
+    true_positive = 0
+    true_negative = 0
+    false_positive = 0
+    false_negative = 0
+
+    with torch.no_grad():
+        for i, data in enumerate(test_loader):
+            img, lab = data
+            img, lab = img.to(device), lab.to(device)
+            outputs = model(img)
+            _, predicted = torch.max(outputs.data, 1)
+
+            # print("size:", img.size(0))
+            figure = plt.figure(figsize=(4, 8))
+            num_of_images = min(img.size(0), 32)
+            for index in range(1, num_of_images + 1):
+                figure.add_subplot(4, 8, index)
+                plt.axis('off')
+                plt.imshow(tensor_to_ndarray(img[index - 1], std=std, mean=mean))
+                plt.title(f'{lab[index - 1].item()}/{predicted[index - 1].item()}',
+                          color=("green" if lab[index - 1].item() == predicted[index - 1].item() else "red"))
+
+                if lab[index - 1].item() == 1:
+                    if predicted[index - 1].item() == 1:
+                        true_positive += 1
+                    else:
+                        false_negative += 1
+                else:
+                    if predicted[index - 1].item() == 0:
+                        true_negative += 1
+                    else:
+                        false_positive += 1
+            plt.show()
+
+    return true_positive, true_negative, false_positive, false_negative
+
+
+def main():
+    dataset = xrv.datasets.COVID19_Dataset(
+        imgpath="covid-chestxray-dataset-master/images",
+        csvpath="covid-chestxray-dataset-master/metadata.csv",
+        transform=transforms.Compose([
+            xrv.datasets.XRayCenterCrop(),
+            # xrv.datasets.XRayResizer(224),
+        ])
+    )
+    ds, mean, std = preprocessing(dataset)
+
+    train_index, test_index = train_test_split(range(len(ds)), test_size=0.2, random_state=42)
+    train_data = Subset(ds, train_index)
+    test_data = Subset(ds, test_index)
+
+    train_ds = CovidDataset(train_data)
+    test_ds = CovidDataset(test_data)
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
+
+    resnet = models.resnet50(pretrained=True)
+    resnet.fc = nn.Linear(resnet.fc.in_features, 2)
+
+    if torch.cuda.is_available():
+        resnet = resnet.cuda()
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(resnet.parameters(), lr=0.001, momentum=0.9)
+
+    num_epochs = 11
+
+    train(resnet, train_loader, optimizer, criterion, num_epochs)
+    tp, tn, fp, fn = test(resnet, test_loader, std, mean)
+    accuracy = (tp + tn) / (tp + tn + fp + fn)
+    precision = tp / (tp + fp)
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    f1 = 2 * tp / (2 * tp + fp + fn)
+
+    # plot confusion matrix in a table
+    plt.figure(figsize=(5, 5))
+    plt.imshow([[tp, fp], [fn, tn]])
+    plt.xticks([0, 1], ["Positive", "Negative"])
+    plt.yticks([0, 1], ["Positive", "Negative"])
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.show()
+
+    # plot table of accuracy, precision, sensitivity, specificity, f1
+    plt.figure(figsize=(5, 5))
+    plt.plot([accuracy, precision, sensitivity, specificity, f1])
+    plt.xticks([0, 1, 2, 3, 4], ["Accuracy", "Precision", "Sensitivity", "Specificity", "F1"])
+    plt.show()
+
+    print("------------")
+    print("True Positive:", tp)
+    print("True Negative:", tn)
+    print("False Positive:", fp)
+    print("False Negative:", fn)
+
+    print("Accuracy:", accuracy)
+    print("Precision:", precision)
+    print("Sensitivity:", sensitivity)
+    print("Specificity:", specificity)
+    print("F1:", f1)
 
 
 if __name__ == "__main__":
