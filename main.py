@@ -48,13 +48,20 @@ def resize(input):
     resized_phil_img = pil_img.resize((width, height), Image.ANTIALIAS)
     return np.array(resized_phil_img)
 
-def preprocess_for_net(mean, std):
+
+def preprocess_for_net(image, mean, std):
     preprocess = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.ToTensor,
-        transforms.Normalize(mean, std)
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[mean], std=[std])
     ])
-    return preprocess
+    return preprocess(image).unsqueeze(0)
+
+
+def tensor_to_ndarray(img, std, mean):
+    image_tensor = img.squeeze(0)
+    image_tensor = image_tensor * std + mean
+    return image_tensor.numpy().squeeze()
 
 
 # original label
@@ -153,6 +160,16 @@ def main():
     mean = np.mean(stack)
     std = np.std(stack)
     print(f"{mean}, {std}")
+
+    for i in range(len(augment_ds)):
+        augment_ds[i]["img"] = preprocess_for_net(augment_ds[i]["img"], mean, std)
+
+    # tmp = tensor_to_ndarray(augment_ds[0]["img"], mean=mean, std=std)
+    #
+    # # Display the image using plt.imshow()
+    # plt.imshow(tmp, cmap='gray')
+    # plt.show()
+
 
 if __name__ == "__main__":
     main()
