@@ -112,7 +112,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(resnet.parameters(), lr=0.001, momentum=0.9)
 
-    num_epochs = 1
+    num_epochs = 10
     for epoch in range(num_epochs):
         running_loss = 0.0
         for i, data in enumerate(train_loader, 0):
@@ -131,17 +131,18 @@ def main():
 
     resnet.eval()
     with torch.no_grad():
-        img, lab = data
-        img, lab = img.to(device), lab.to(device)
-        outputs = resnet(img)
-        _, predicted = torch.max(outputs.data, 1)
+        for i, data in enumerate(test_loader):
+            img, lab = data
+            img, lab = img.to(device), lab.to(device)
+            outputs = resnet(img)
+            _, predicted = torch.max(outputs.data, 1)
 
-        for j in range(img.size(0)):
-            # Display the image
-            plt.imshow(tensor_to_ndarray(img[j], std=std, mean=mean))
-            plt.title(f'Label: {lab[j].item()}, Predicted: {predicted[j].item()}')
-            plt.axis('off')
-            plt.show()
+            for j in range(img.size(0)):
+                # Display the image
+                plt.imshow(tensor_to_ndarray(img[j], std=std, mean=mean))
+                plt.title(f'Label: {lab[j].item()}, Predicted: {predicted[j].item()}')
+                plt.axis('off')
+                plt.show()
 
 
 '''
