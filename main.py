@@ -1,10 +1,15 @@
 import numpy as np
+import torch
 import torchxrayvision as xrv
 import matplotlib.pyplot as plt
 from PIL import Image
 import imgaug.augmenters as iaa
 import torchvision.models as models
 import torchvision.transforms as transforms
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Subset, Dataset
+import torch.nn as nn
+import torch.optim as optim
 
 # https://github.com/ieee8023/covid-chestxray-dataset
 
@@ -20,8 +25,7 @@ augment_seq = iaa.Sequential([
     iaa.GaussianBlur(sigma=(0, 2.0)),
 ], random_order=True)
 
-resnet = models.resnet50(pretrained=True)
-resnet.eval()
+
 
 
 def to_255(img):
@@ -43,6 +47,10 @@ def norm_pixel_values(img):
     return np.clip((img / 1024 + 1.) * 0.5, 0, 1)
 
 
+def grayscale_to_rgb(p):
+    return p.expand(3, -1, -1)
+
+
 def resize(input):
     pil_img = Image.fromarray(input)
     resized_phil_img = pil_img.resize((width, height), Image.ANTIALIAS)
@@ -53,52 +61,87 @@ def preprocess_for_net(image, mean, std):
     preprocess = transforms.Compose([
         transforms.ToPILImage(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[mean], std=[std])
+        transforms.Normalize(mean=[mean], std=[std]),
+        grayscale_to_rgb,
     ])
-    return preprocess(image).unsqueeze(0)
+    return preprocess(image)
 
 
-def tensor_to_ndarray(img, std, mean):
-    image_tensor = img.squeeze(0)
-    image_tensor = image_tensor * std + mean
-    return image_tensor.numpy().squeeze()
+def tensor_to_ndarray(img_tensor, std, mean):
+    img = img_tensor.cpu().numpy().transpose((1, 2, 0))
+    img = (img * std) + mean
+    img = np.clip(img, 0, 1)
+    return img
 
 
-# original label
-'''
-00 = {str} 'Aspergillosis'
-01 = {str} 'Aspiration'
-02 = {str} 'Bacterial'
-03 = {str} 'COVID-19'
-04 = {str} 'Chlamydophila'
-05 = {str} 'Fungal'
-06 = {str} 'H1N1'
-07 = {str} 'Herpes '
-08 = {str} 'Influenza'
-09 = {str} 'Klebsiella'
-10 = {str} 'Legionella'
-11 = {str} 'Lipoid'
-12 = {str} 'MERS-CoV'
-13 = {str} 'MRSA'
-14 = {str} 'Mycoplasma'
-15 = {str} 'No Finding'
-16 = {str} 'Nocardia'
-17 = {str} 'Pneumocystis'
-18 = {str} 'Pneumonia'
-19 = {str} 'SARS'
-20 = {str} 'Staphylococcus'
-21 = {str} 'Streptococcus'
-22 = {str} 'Tuberculosis'
-23 = {str} 'Varicella'
-24 = {str} 'Viral'
-'''
+
+class CovidDataset(Dataset):
+    def __init__(self, data_list):
+        self.data_list = data_list
+
+    def __getitem__(self, index):
+        data = self.data_list[index]
+        img = data["img"]
+        lab = torch.tensor(data["lab"], dtype=torch.long)
+
+        return img, lab
+
+    def __len__(self):
+        return len(self.data_list)
 
 
 def main():
     dataset = xrv.datasets.COVID19_Dataset(imgpath="covid-chestxray-dataset-master/images",
                                            csvpath="covid-chestxray-dataset-master/metadata.csv")
-    ds = preprocessing(dataset)
-    print(ds)
+    ds, mean, std = preprocessing(dataset)
+
+    train_index, test_index = train_test_split(range(len(ds)), test_size=0.2, random_state=42)
+    train_data = Subset(ds, train_index)
+    test_data = Subset(ds, test_index)
+
+    train_ds = CovidDataset(train_data.dataset)
+    test_ds = CovidDataset(test_data.dataset)
+    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)
+
+    resnet = models.resnet50(pretrained=True)
+
+    resnet.fc = nn.Linear(resnet.fc.in_features, 2)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(resnet.parameters(), lr=0.001, momentum=0.9)
+
+    num_epochs = 1
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        for i, data in enumerate(train_loader, 0):
+            img, lab = data
+            img, lab = img.to(device), lab.to(device)
+
+            optimizer.zero_grad()
+
+            outputs = resnet(img)
+            loss = criterion(outputs, lab)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+        print(f"Epoch {epoch + 1}, Loss: {running_loss}")
+
+    resnet.eval()
+    with torch.no_grad():
+        img, lab = data
+        img, lab = img.to(device), lab.to(device)
+        outputs = resnet(img)
+        _, predicted = torch.max(outputs.data, 1)
+
+        for j in range(img.size(0)):
+            # Display the image
+            plt.imshow(tensor_to_ndarray(img[j], std=std, mean=mean))
+            plt.title(f'Label: {lab[j].item()}, Predicted: {predicted[j].item()}')
+            plt.axis('off')
+            plt.show()
 
 
 '''
@@ -115,12 +158,12 @@ def preprocessing(dataset):
     for i in range(len(dataset)):
         img = dataset[i]["img"][0]
         normalized = norm_pixel_values(img)
-
+        print(i)
         ds = dataset[i]
         new_ds.append({
             "idx": ds["idx"],
             "img": normalized,
-            "lab": ds["lab"][3]
+            "lab": ds["lab"][3].astype(np.int8)
         })
 
         if ds["lab"][3] == 1:
@@ -131,7 +174,6 @@ def preprocessing(dataset):
     augment_ds = []
     offset = covid_cnt - non_covid_cnt
     ratio = -(covid_cnt // -non_covid_cnt)
-    print(f"ratio is {ratio}")
     covid_cnt = non_covid_cnt = 0  # for recalculation
     for i in range(len(new_ds)):
         augmented = []
@@ -172,7 +214,7 @@ def preprocessing(dataset):
     # plt.imshow(tmp, cmap='gray')
     # plt.show()
     print("Preprocessing end")
-    return augment_ds
+    return augment_ds, mean, std
 
 
 if __name__ == "__main__":
